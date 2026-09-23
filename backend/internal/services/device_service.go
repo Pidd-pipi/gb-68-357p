@@ -73,15 +73,37 @@ func (s *DeviceService) DeleteDevice(id uint) error {
 	return result.Error
 }
 
-func (s *DeviceService) UpdateHeartbeat(serial string) error {
-	now := time.Now()
-	updates := map[string]interface{}{
-		"last_heartbeat": now,
-		"status":         models.DeviceStatusOnline,
+// HeartbeatResult 心跳处理结果
+type HeartbeatResult struct {
+	Device *models.Device
+}
+
+// Heartbeat 更新设备心跳并置为在线。返回 ErrDeviceNotFound（包装 gorm 记录不存在）
+// 时表示序列号未注册。
+func (s *DeviceService) Heartbeat(serial string) (*models.Device, error) {
+	device, err := s.GetDeviceBySerial(serial)
+	if err != nil {
+		return nil, err
 	}
-	return database.DB.Model(&models.Device{}).
-		Where("serial_number = ?", serial).
-		Updates(updates).Error
+
+	now := time.Now()
+	if err := database.DB.Model(&models.Device{}).
+		Where("id = ?", device.ID).
+		Updates(map[string]interface{}{
+			"last_heartbeat": now,
+			"status":         models.DeviceStatusOnline,
+		}).Error; err != nil {
+		return nil, err
+	}
+
+	device.LastHeartbeat = &now
+	device.Status = models.DeviceStatusOnline
+	return device, nil
+}
+
+func (s *DeviceService) UpdateHeartbeat(serial string) error {
+	_, err := s.Heartbeat(serial)
+	return err
 }
 
 func (s *DeviceService) CheckOfflineDevices(timeout time.Duration) ([]models.Device, error) {

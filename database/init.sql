@@ -88,6 +88,31 @@ CREATE TABLE IF NOT EXISTS irrigation_logs (
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_zone_time ON irrigation_logs(zone_id, start_time);
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_time ON irrigation_logs(start_time);
 
+-- 设备控制命令类型枚举
+CREATE TYPE command_type AS ENUM ('open_valve', 'close_valve');
+-- 设备控制命令状态枚举（待确认 / 执行中 / 成功 / 失败）
+CREATE TYPE command_status AS ENUM ('pending', 'executing', 'success', 'failed');
+
+-- 设备控制命令表（手动灌溉下发，心跳回执确认）
+CREATE TABLE IF NOT EXISTS device_commands (
+    id BIGSERIAL PRIMARY KEY,
+    command_no VARCHAR(40) UNIQUE NOT NULL,
+    device_id BIGINT NOT NULL REFERENCES devices(id),
+    zone_id BIGINT NOT NULL REFERENCES irrigation_zones(id),
+    irrigation_log_id BIGINT REFERENCES irrigation_logs(id),
+    type command_type NOT NULL,
+    payload JSONB,
+    status command_status NOT NULL DEFAULT 'pending',
+    acked_at TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_commands_device_status ON device_commands(device_id, status);
+CREATE INDEX IF NOT EXISTS idx_device_commands_pending_expire ON device_commands(status, expires_at);
+
 -- 告警类型枚举
 CREATE TYPE alert_type AS ENUM ('device_offline', 'sensor_abnormal', 'irrigation_failed');
 CREATE TYPE alert_level AS ENUM ('info', 'warning', 'critical');

@@ -53,6 +53,19 @@ func (s *AlertService) CreateIrrigationFailedAlert(zoneID *uint, msg string) err
 	return s.CreateAlert(alert)
 }
 
+// CreateCommandAckTimeoutAlert 命令下发后超时未收到回执（或设备回报失败）的告警
+func (s *AlertService) CreateCommandAckTimeoutAlert(commandNo string, deviceID, zoneID uint, msg string) error {
+	alert := &models.Alert{
+		Type:     models.AlertTypeIrrigationFailed,
+		Level:    models.AlertLevelCritical,
+		Title:    "阀门命令回执失败",
+		Message:  msg,
+		DeviceID: &deviceID,
+		Status:   models.AlertStatusNew,
+	}
+	return s.CreateAlert(alert)
+}
+
 func (s *AlertService) GetAlertByID(id uint) (*models.Alert, error) {
 	var alert models.Alert
 	if err := database.DB.First(&alert, id).Error; err != nil {

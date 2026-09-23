@@ -128,6 +128,39 @@ type IrrigationLog struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+type CommandType string
+
+const (
+	CommandTypeOpenValve  CommandType = "open_valve"
+	CommandTypeCloseValve CommandType = "close_valve"
+)
+
+type CommandStatus string
+
+const (
+	CommandStatusPending   CommandStatus = "pending"
+	CommandStatusExecuting CommandStatus = "executing"
+	CommandStatusSuccess   CommandStatus = "success"
+	CommandStatusFailed    CommandStatus = "failed"
+)
+
+// DeviceCommand 下发给设备的控制命令，依靠设备心跳回执确认送达与执行
+type DeviceCommand struct {
+	ID              uint                   `json:"id" gorm:"primaryKey"`
+	CommandNo       string                 `json:"command_no" gorm:"size:40;uniqueIndex;not null"`
+	DeviceID        uint                   `json:"device_id" gorm:"not null;index"`
+	ZoneID          uint                   `json:"zone_id" gorm:"not null"`
+	IrrigationLogID *uint                  `json:"irrigation_log_id" gorm:"index"`
+	Type            CommandType            `json:"type" gorm:"type:command_type;not null"`
+	Payload         map[string]interface{} `json:"payload,omitempty" gorm:"type:jsonb"`
+	Status          CommandStatus          `json:"status" gorm:"type:command_status;not null;default:'pending';index"`
+	AckedAt         *time.Time             `json:"acked_at"`
+	ExpiresAt       time.Time              `json:"expires_at" gorm:"not null;index"`
+	ErrorMessage    *string                `json:"error_message" gorm:"type:text"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+}
+
 type AlertType string
 
 const (

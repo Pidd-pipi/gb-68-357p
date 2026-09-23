@@ -13,6 +13,7 @@ import (
 type IrrigationScheduler struct {
 	scheduleService  *services.ScheduleService
 	irrigationService *services.IrrigationService
+	commandService   *services.CommandService
 	sensorService   *services.SensorService
 	deviceService  *services.DeviceService
 	alertService   *services.AlertService
@@ -22,6 +23,7 @@ func NewIrrigationScheduler() *IrrigationScheduler {
 	return &IrrigationScheduler{
 		scheduleService:  services.NewScheduleService(),
 		irrigationService: services.NewIrrigationService(),
+		commandService:   services.NewCommandService(),
 		sensorService:   services.NewSensorService(),
 		deviceService:  services.NewDeviceService(),
 		alertService:   services.NewAlertService(),
@@ -33,6 +35,7 @@ func (s *IrrigationScheduler) Start() {
 
 	go s.runScheduleCheck()
 	go s.runDeviceHealthCheck()
+	go s.runCommandAckTimeoutCheck()
 }
 
 func (s *IrrigationScheduler) runScheduleCheck() {
@@ -175,6 +178,23 @@ func (s *IrrigationScheduler) checkDeviceHealth() {
 			s.deviceService.MarkDeviceOffline(device.ID)
 			s.alertService.CreateDeviceOfflineAlert(device.ID, device.Name)
 			logger.Warn("Device marked as offline", zap.Uint("device_id", device.ID), zap.String("device_name", device.Name))
+		}
+	}
+}
+
+// runCommandAckTimeoutCheck 每秒扫描超过 30 秒未收到回执的待确认命令，判失败并告警
+func (s *IrrigationScheduler) runCommandAckTimeoutCheck() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		failed, err := s.commandService.SweepExpiredCommands(time.Now())
+		if err != nil {
+			logger.Error("Failed to sweep expired commands", zap.Error(err))
+			continue
+		}
+		if failed > 0 {
+			logger.Warn("Expired commands marked as failed", zap.Int64("count", failed))
 		}
 	}
 }

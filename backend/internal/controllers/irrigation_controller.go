@@ -1,39 +1,44 @@
 package controllers
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"irrigation/internal/models"
 	"irrigation/internal/services"
 	"irrigation/pkg/response"
 )
 
 type IrrigationController struct {
 	irrigationService *services.IrrigationService
+	commandService    *services.CommandService
 }
 
 func NewIrrigationController() *IrrigationController {
 	return &IrrigationController{
 		irrigationService: services.NewIrrigationService(),
+		commandService:    services.NewCommandService(),
 	}
 }
 
 // ManualIrrigate godoc
 // @Summary 手动灌溉
-// @Description 触发手动灌溉
+// @Description 下发手动开阀命令，先返回待确认命令编号；设备心跳带回编号后进入执行中，30秒无回执判失败并告警
 // @Tags 灌溉执行
 // @Security ApiKeyAuth
 // @Accept json
 // @Produce json
-// @Param zone_id body int true "区域ID"
-// @Success 200 {object} models.IrrigationLog
+// @Param body body object true "手动灌溉请求"
+// @Success 200 {object} models.DeviceCommand
 // @Router /api/irrigation/manual [post]
 func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 	var req struct {
-		ZoneID uint `json:"zone_id" binding:"required"`
+		ZoneID          uint   `json:"zone_id" binding:"required"`
+		DeviceID        *uint  `json:"device_id"`
+		DurationSeconds int    `json:"duration_seconds"`
+		CommandNo       string `json:"command_no"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -41,13 +46,58 @@ func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 		return
 	}
 
-	log, err := c.irrigationService.StartIrrigation(nil, &req.ZoneID, models.TriggerTypeManual)
+	command, err := c.commandService.IssueManualCommand(&services.IssueManualCommandInput{
+		ZoneID:          req.ZoneID,
+		DeviceID:        req.DeviceID,
+		DurationSeconds: req.DurationSeconds,
+		CommandNo:       req.CommandNo,
+	})
 	if err != nil {
-		response.InternalServerError(ctx, err.Error())
+		switch {
+		case errors.Is(err, services.ErrZoneNotFound):
+			response.NotFound(ctx, "Zone not found")
+		case errors.Is(err, services.ErrDeviceNotFound):
+			response.NotFound(ctx, "Device not found")
+		case errors.Is(err, services.ErrDeviceOffline):
+			response.Error(ctx, 409, "Device is offline, command rejected")
+		case errors.Is(err, services.ErrDeviceZoneMismatch):
+			response.BadRequest(ctx, "Device does not belong to the zone")
+		case errors.Is(err, services.ErrNoValveInZone):
+			response.BadRequest(ctx, "Zone has no valve device")
+		case errors.Is(err, services.ErrMultipleValvesInZone):
+			response.BadRequest(ctx, "Zone has multiple valve devices, specify device_id")
+		case errors.Is(err, services.ErrCommandNoConflict):
+			response.Error(ctx, 409, "Command number already exists")
+		default:
+			response.InternalServerError(ctx, err.Error())
+		}
 		return
 	}
 
-	response.Success(ctx, log)
+	response.Success(ctx, command)
+}
+
+// GetCommand godoc
+// @Summary 查询命令结果
+// @Description 管理员按命令编号查询下发命令的确认与执行结果
+// @Tags 灌溉执行
+// @Security ApiKeyAuth
+// @Produce json
+// @Param command_no path string true "命令编号"
+// @Success 200 {object} models.DeviceCommand
+// @Router /api/irrigation/commands/{command_no} [get]
+func (c *IrrigationController) GetCommand(ctx *gin.Context) {
+	commandNo := ctx.Param("command_no")
+	command, err := c.commandService.GetCommandByNo(commandNo)
+	if err != nil {
+		if errors.Is(err, services.ErrCommandNotFound) {
+			response.NotFound(ctx, "Command not found")
+			return
+		}
+		response.InternalServerError(ctx, err.Error())
+		return
+	}
+	response.Success(ctx, command)
 }
 
 // GetIrrigationHistory godoc
