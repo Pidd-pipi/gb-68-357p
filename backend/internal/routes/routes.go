@@ -83,6 +83,7 @@ func SetupRoutes(r *gin.Engine) {
 			irrigationController := controllers.NewIrrigationController()
 			irrigation.POST("/manual", irrigationController.ManualIrrigate)
 			irrigation.GET("/history", irrigationController.GetHistory)
+			irrigation.GET("/commands/:command_no", irrigationController.GetCommand)
 		}
 
 		statistics := api.Group("/statistics", middleware.JWTAuth())

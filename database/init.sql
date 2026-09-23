@@ -88,6 +88,27 @@ CREATE TABLE IF NOT EXISTS irrigation_logs (
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_zone_time ON irrigation_logs(zone_id, start_time);
 CREATE INDEX IF NOT EXISTS idx_irrigation_logs_time ON irrigation_logs(start_time);
 
+-- 灌溉命令状态枚举
+CREATE TYPE command_status AS ENUM ('pending', 'executing', 'failed');
+
+-- 灌溉命令表（下发回执跟踪）
+CREATE TABLE IF NOT EXISTS irrigation_commands (
+    id BIGSERIAL PRIMARY KEY,
+    command_no VARCHAR(64) UNIQUE NOT NULL,
+    zone_id INTEGER NOT NULL REFERENCES irrigation_zones(id),
+    device_id INTEGER NOT NULL REFERENCES devices(id),
+    irrigation_log_id BIGINT REFERENCES irrigation_logs(id),
+    status command_status DEFAULT 'pending',
+    expires_at TIMESTAMP NOT NULL,
+    acked_at TIMESTAMP,
+    failure_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_irrigation_commands_status_expires ON irrigation_commands(status, expires_at);
+
 -- 告警类型枚举
 CREATE TYPE alert_type AS ENUM ('device_offline', 'sensor_abnormal', 'irrigation_failed');
 CREATE TYPE alert_level AS ENUM ('info', 'warning', 'critical');

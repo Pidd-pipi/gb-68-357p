@@ -128,6 +128,28 @@ type IrrigationLog struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+type CommandStatus string
+
+const (
+	CommandStatusPending   CommandStatus = "pending"
+	CommandStatusExecuting CommandStatus = "executing"
+	CommandStatusFailed    CommandStatus = "failed"
+)
+
+type IrrigationCommand struct {
+	ID              uint          `json:"id" gorm:"primaryKey"`
+	CommandNo       string        `json:"command_no" gorm:"size:64;uniqueIndex;not null"`
+	ZoneID          uint          `json:"zone_id" gorm:"not null"`
+	DeviceID        uint          `json:"device_id" gorm:"not null"`
+	IrrigationLogID *uint         `json:"irrigation_log_id"`
+	Status          CommandStatus `json:"status" gorm:"type:command_status;default:'pending'"`
+	ExpiresAt       time.Time     `json:"expires_at" gorm:"not null"`
+	AckedAt         *time.Time    `json:"acked_at"`
+	FailureReason   *string       `json:"failure_reason" gorm:"type:text"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+}
+
 type AlertType string
 
 const (

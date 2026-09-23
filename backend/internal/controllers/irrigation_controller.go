@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -13,23 +15,29 @@ import (
 
 type IrrigationController struct {
 	irrigationService *services.IrrigationService
+	commandService    *services.CommandService
+	zoneService       *services.ZoneService
+	deviceService     *services.DeviceService
 }
 
 func NewIrrigationController() *IrrigationController {
 	return &IrrigationController{
 		irrigationService: services.NewIrrigationService(),
+		commandService:    services.NewCommandService(),
+		zoneService:       services.NewZoneService(),
+		deviceService:     services.NewDeviceService(),
 	}
 }
 
 // ManualIrrigate godoc
 // @Summary 手动灌溉
-// @Description 触发手动灌溉
+// @Description 触发手动灌溉，生成待确认命令并返回命令编号，设备回执后进入执行中
 // @Tags 灌溉执行
 // @Security ApiKeyAuth
 // @Accept json
 // @Produce json
 // @Param zone_id body int true "区域ID"
-// @Success 200 {object} models.IrrigationLog
+// @Success 200 {object} models.IrrigationCommand
 // @Router /api/irrigation/manual [post]
 func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 	var req struct {
@@ -41,13 +49,77 @@ func (c *IrrigationController) ManualIrrigate(ctx *gin.Context) {
 		return
 	}
 
+	if _, err := c.zoneService.GetZoneByID(req.ZoneID); err != nil {
+		response.NotFound(ctx, "zone not found")
+		return
+	}
+
+	valve, err := c.findOnlineValve(req.ZoneID)
+	if err != nil {
+		response.BadRequest(ctx, err.Error())
+		return
+	}
+
 	log, err := c.irrigationService.StartIrrigation(nil, &req.ZoneID, models.TriggerTypeManual)
 	if err != nil {
 		response.InternalServerError(ctx, err.Error())
 		return
 	}
 
-	response.Success(ctx, log)
+	cmd, err := c.commandService.CreateCommand(req.ZoneID, valve.ID, &log.ID)
+	if err != nil {
+		if err == services.ErrCommandNoConflict {
+			response.Error(ctx, http.StatusConflict, "command number conflict, please retry")
+			return
+		}
+		response.InternalServerError(ctx, err.Error())
+		return
+	}
+
+	response.Success(ctx, cmd)
+}
+
+// findOnlineValve 查找区域内在线的阀门设备；无阀门或阀门离线时明确拒绝
+func (c *IrrigationController) findOnlineValve(zoneID uint) (*models.Device, error) {
+	valveType := string(models.DeviceTypeValve)
+	valves, err := c.deviceService.ListDevices(&zoneID, &valveType, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(valves) == 0 {
+		return nil, errors.New("no valve device in this zone")
+	}
+	for i := range valves {
+		if valves[i].Status == models.DeviceStatusOnline {
+			return &valves[i], nil
+		}
+	}
+	return nil, errors.New("valve device is offline, command rejected")
+}
+
+// GetCommand godoc
+// @Summary 查询灌溉命令结果
+// @Description 管理员按命令编号查询命令执行结果
+// @Tags 灌溉执行
+// @Security ApiKeyAuth
+// @Produce json
+// @Param command_no path string true "命令编号"
+// @Success 200 {object} models.IrrigationCommand
+// @Router /api/irrigation/commands/{command_no} [get]
+func (c *IrrigationController) GetCommand(ctx *gin.Context) {
+	commandNo := ctx.Param("command_no")
+
+	cmd, err := c.commandService.GetCommandByNo(commandNo)
+	if err != nil {
+		if err == services.ErrCommandNotFound {
+			response.NotFound(ctx, "command not found")
+			return
+		}
+		response.InternalServerError(ctx, err.Error())
+		return
+	}
+
+	response.Success(ctx, cmd)
 }
 
 // GetIrrigationHistory godoc

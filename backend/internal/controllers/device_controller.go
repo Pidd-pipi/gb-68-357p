@@ -151,20 +151,40 @@ func (c *DeviceController) Delete(ctx *gin.Context) {
 
 // Heartbeat godoc
 // @Summary 设备心跳
-// @Description 设备上报心跳
+// @Description 设备上报心跳，可携带命令回执编号
 // @Tags 设备管理
 // @Accept json
 // @Produce json
 // @Param serial path string true "设备序列号"
+// @Param request body object false "回执信息" example({"command_acks": ["CMD20260923120000AB12"]})
 // @Success 200 {object} response.Response
 // @Router /api/devices/{serial}/heartbeat [post]
 func (c *DeviceController) Heartbeat(ctx *gin.Context) {
 	serial := ctx.Param("serial")
-	
+
+	device, err := c.deviceService.GetDeviceBySerial(serial)
+	if err != nil {
+		response.NotFound(ctx, "device not found")
+		return
+	}
+
 	if err := c.deviceService.UpdateHeartbeat(serial); err != nil {
 		response.InternalServerError(ctx, err.Error())
 		return
 	}
 
-	response.Success(ctx, nil)
+	var req struct {
+		CommandAcks []string `json:"command_acks"`
+	}
+	// 心跳可以不携带 body，解析失败按无回执处理
+	_ = ctx.ShouldBindJSON(&req)
+
+	if len(req.CommandAcks) == 0 {
+		response.Success(ctx, nil)
+		return
+	}
+
+	commandService := services.NewCommandService()
+	results := commandService.ProcessAcks(device.ID, req.CommandAcks)
+	response.Success(ctx, gin.H{"ack_results": results})
 }

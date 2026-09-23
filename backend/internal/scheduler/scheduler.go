@@ -16,6 +16,7 @@ type IrrigationScheduler struct {
 	sensorService   *services.SensorService
 	deviceService  *services.DeviceService
 	alertService   *services.AlertService
+	commandService *services.CommandService
 }
 
 func NewIrrigationScheduler() *IrrigationScheduler {
@@ -25,6 +26,7 @@ func NewIrrigationScheduler() *IrrigationScheduler {
 		sensorService:   services.NewSensorService(),
 		deviceService:  services.NewDeviceService(),
 		alertService:   services.NewAlertService(),
+		commandService: services.NewCommandService(),
 	}
 }
 
@@ -33,6 +35,24 @@ func (s *IrrigationScheduler) Start() {
 
 	go s.runScheduleCheck()
 	go s.runDeviceHealthCheck()
+	go s.runCommandTimeoutCheck()
+}
+
+// runCommandTimeoutCheck 周期扫描超时未回执的命令，记失败并生成告警
+func (s *IrrigationScheduler) runCommandTimeoutCheck() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		failed, err := s.commandService.FailExpiredCommands()
+		if err != nil {
+			logger.Error("Failed to check expired commands", zap.Error(err))
+			continue
+		}
+		if failed > 0 {
+			logger.Warn("Commands failed due to ack timeout", zap.Int("count", failed))
+		}
+	}
 }
 
 func (s *IrrigationScheduler) runScheduleCheck() {
